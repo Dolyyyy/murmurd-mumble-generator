@@ -49,10 +49,10 @@ chmod +x mumbleserver.sh
 
 🛠 Usage
 ➕ Create a server
-``bash mumbleserver.sh myserver``
+```bash mumbleserver.sh myserver```
 
 With a custom port:
 
-``bash mumbleserver.sh -p 65000 myserver``
+```bash mumbleserver.sh -p 65000 myserver```
 
 If the port is already in use, the script automatically increments it.
