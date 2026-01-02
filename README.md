@@ -49,6 +49,7 @@ chmod +x mumbleserver.sh
 
 🛠 Usage
 ➕ Create a server
+
 ```bash mumbleserver.sh myserver```
 
 With a custom port:
