@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# PATH robuste
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 log(){ echo -e "\n🔹 $1"; }
 die(){ echo -e "\n❌ $1"; exit 1; }
 
@@ -39,7 +42,6 @@ done
 # VARIABLES
 # --------------------------------------------------
 SERVICE="mumble-server-$NAME"
-BIN="/usr/bin/mumble-server"
 CONFIG="/etc/$SERVICE.ini"
 DB_DIR="/var/lib/$SERVICE"
 DB_FILE="$DB_DIR/mumble-server.sqlite"
@@ -47,8 +49,9 @@ LOG_DIR="/var/log/mumble-server"
 LOG_FILE="$LOG_DIR/$SERVICE.log"
 UNIT="/etc/systemd/system/$SERVICE.service"
 
+CONFIG_URL="https://raw.githubusercontent.com/Dolyyyy/murmurd-mumble-generator/main/mumble-server.ini"
 DB_ZIP_URL="https://github.com/Dolyyyy/murmurd-mumble-generator/raw/main/mumble-server.sqlite.zip"
-TMP_ZIP="/tmp/$SERVICE-db.zip"
+TMP_DB_ZIP="/tmp/$SERVICE-db.zip"
 
 # --------------------------------------------------
 # SUPPRESSION
@@ -82,7 +85,23 @@ systemctl stop mumble-server 2>/dev/null || true
 systemctl disable mumble-server 2>/dev/null || true
 systemctl mask mumble-server 2>/dev/null || true
 
-[[ -x "$BIN" ]] || die "Binaire mumble-server introuvable"
+# --------------------------------------------------
+# DÉTECTION DU BINAIRE
+# --------------------------------------------------
+log "Détection du binaire Murmur"
+
+BIN=""
+if command -v murmurd >/dev/null 2>&1; then
+  BIN="$(command -v murmurd)"
+elif [[ -x /usr/sbin/murmurd ]]; then
+  BIN="/usr/sbin/murmurd"
+elif [[ -x /usr/bin/murmurd ]]; then
+  BIN="/usr/bin/murmurd"
+fi
+
+[[ -x "$BIN" ]] || die "Binaire Murmur introuvable"
+
+echo "➡️ Binaire détecté : $BIN"
 
 # --------------------------------------------------
 # PORT
@@ -106,28 +125,41 @@ chmod 750 "$DB_DIR"
 # BASE DE DONNÉES
 # --------------------------------------------------
 log "Téléchargement de la base de données"
-curl -fsSL "$DB_ZIP_URL" -o "$TMP_ZIP"
+curl -fsSL "$DB_ZIP_URL" -o "$TMP_DB_ZIP"
 
 log "Décompression de la base de données"
-unzip -o "$TMP_ZIP" -d "$DB_DIR"
-rm -f "$TMP_ZIP"
+unzip -o "$TMP_DB_ZIP" -d "$DB_DIR"
+rm -f "$TMP_DB_ZIP"
 
-[[ -f "$DB_FILE" ]] || die "DB introuvable après décompression"
+[[ -f "$DB_FILE" ]] || die "Base de données introuvable"
 
 chown mumble-server:mumble-server "$DB_FILE"
 chmod 640 "$DB_FILE"
 
 # --------------------------------------------------
-# CONFIG
+# CONFIGURATION (BASÉE SUR TON GIT)
 # --------------------------------------------------
-log "Création du fichier de configuration"
-cat > "$CONFIG" <<EOF
-port=$PORT
-host=0.0.0.0
-database=$DB_FILE
-logfile=$LOG_FILE
-welcometext="Bienvenue sur $NAME"
-EOF
+log "Téléchargement de la configuration officielle"
+curl -fsSL "$CONFIG_URL" -o "$CONFIG"
+
+# --- PATCH CONFIG (RÈGLES SERVEUR) ---
+log "Application des règles serveur permissives"
+
+# Port / host / DB / logs
+sed -i "s|^port=.*|port=$PORT|" "$CONFIG"
+sed -i "s|^host=.*|host=0.0.0.0|" "$CONFIG"
+sed -i "s|^database=.*|database=$DB_FILE|" "$CONFIG"
+sed -i "s|^logfile=.*|logfile=$LOG_FILE|" "$CONFIG"
+
+# Autoriser TOUS les pseudos (FiveM / bots / CitizenFX)
+sed -i 's|^username=.*|username=.*|' "$CONFIG"
+grep -q '^username=' "$CONFIG" || echo 'username=.*' >> "$CONFIG"
+
+# Sécurité / compat
+sed -i 's|^;*certrequired=.*|certrequired=false|' "$CONFIG"
+sed -i 's|^;*allowhtml=.*|allowhtml=true|' "$CONFIG"
+sed -i 's|^;*allowping=.*|allowping=true|' "$CONFIG"
+sed -i 's|^;*suggestVersion=.*|suggestVersion=|' "$CONFIG"
 
 chown root:mumble-server "$CONFIG"
 chmod 640 "$CONFIG"
@@ -170,7 +202,7 @@ echo " Nom     : $NAME"
 echo " IP      : $IP"
 echo " Port    : $PORT"
 echo " DB      : $DB_FILE"
-echo " Logs    : $LOG_FILE"
+echo " Logs    : journalctl -u $SERVICE -f"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Admin SuperUser :"
 echo "   $BIN -ini $CONFIG -supw \"TON_MOT_DE_PASSE\""
